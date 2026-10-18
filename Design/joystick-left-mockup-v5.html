@@ -1,0 +1,346 @@
+<!--
+  Rover Control — landscape-only mockup (v5).
+  Visual pass: per Apple's HIG, Liquid Glass belongs on the controls/chrome
+  layer (joystick, utility buttons), not on content-layer data cards. So:
+  - Joystick + utility buttons get a glass/frosted treatment (approximated
+    here with backdrop-filter + gradients; real SwiftUI .glassEffect()/
+    .buttonStyle(.glass) will look better and react to motion/light).
+  - Telemetry cards get an "elevated panel" treatment instead: gradient
+    depth, soft shadow, status-colored glow, stronger typography — no glass.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rover Control — v5 (landscape only)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface-top: #333a49;
+    --surface-bot: #242931;
+    --dim: #8a93a6;
+    --ok: #3ddc84;
+    --warn: #ffb74d;
+    --bad: #ff5c5c;
+    --accent: #4da6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background:
+      radial-gradient(ellipse 900px 500px at 20% -10%, rgba(77,166,255,0.08), transparent 60%),
+      var(--bg);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  .screen { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- Top status bar ---------- */
+  .status-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 8px 16px -8px rgba(0,0,0,0.5);
+  }
+  .status-bar .title { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: 0.01em; }
+  .status-right { display: flex; align-items: center; gap: 20px; font-size: 13px; color: var(--dim); }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; box-shadow: 0 0 6px var(--ok); }
+  .battery-icon { width: 24px; height: 12px; flex: none; }
+  .battery-volts { font-variant-numeric: tabular-nums; }
+  .failsafe-banner {
+    display: none;
+    align-items: center; gap: 8px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: rgba(255,183,77,0.15);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 0 14px rgba(255,183,77,0.35);
+  }
+  .failsafe-banner.active { display: flex; }
+  .demo-toggle {
+    font-size: 11px; color: var(--dim); background: none; border: 1px solid rgba(138,147,166,0.3);
+    border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  }
+
+  /* ---------- Main content ---------- */
+  .content { flex: 1; display: flex; padding: 18px 24px; gap: 18px; min-height: 0; }
+
+  /* Left pane: glass controls */
+  .left-pane {
+    flex: 0 0 36%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 28px;
+  }
+  .utility-buttons { display: flex; gap: 10px; }
+  .util-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.03));
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+    color: var(--accent);
+    font-size: 13px; font-weight: 600;
+    user-select: none;
+  }
+  .joystick-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .joystick-base {
+    position: relative;
+    width: 220px; height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.10), rgba(42,47,58,0.55) 55%, rgba(30,33,41,0.75) 100%);
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.12), inset 0 -12px 24px rgba(0,0,0,0.35), 0 10px 26px rgba(0,0,0,0.45);
+    touch-action: none;
+  }
+  .joystick-base::before, .joystick-base::after {
+    content: ""; position: absolute; background: rgba(255,255,255,0.12);
+  }
+  .joystick-base::before { left: 10px; right: 10px; top: 50%; height: 1px; transform: translateY(-50%); }
+  .joystick-base::after { top: 10px; bottom: 10px; left: 50%; width: 1px; transform: translateX(-50%); }
+  .joystick-knob {
+    position: absolute;
+    width: 80px; height: 80px;
+    left: 50%; top: 50%;
+    margin-left: -40px; margin-top: -40px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 26%, #bfe2ff 0%, var(--accent) 45%, #2d7fd1 100%);
+    box-shadow: 0 10px 22px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.55), inset 0 -8px 14px rgba(0,40,80,0.35);
+    transition: background 0.15s ease;
+  }
+  .joystick-knob.dragging {
+    background: radial-gradient(circle at 32% 26%, #d6ffe9 0%, var(--ok) 45%, #1f9c5c 100%);
+  }
+  .axis-legend {
+    display: flex; justify-content: space-between; width: 220px;
+    font-size: 11px; color: var(--dim);
+  }
+  .readout { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* Right pane: elevated panels, not glass */
+  .right-pane { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .row { display: flex; gap: 12px; flex: 1; }
+  .card {
+    background: linear-gradient(180deg, var(--surface-top) 0%, var(--surface-bot) 100%);
+    border-radius: 18px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 0;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 8px 18px -6px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07);
+  }
+  .card.glow-ok { box-shadow: 0 8px 18px -6px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07), 0 0 0 1px rgba(61,220,132,0.35), 0 0 18px rgba(61,220,132,0.12); }
+  .card.glow-warn { box-shadow: 0 8px 18px -6px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07), 0 0 0 1px rgba(255,183,77,0.4), 0 0 18px rgba(255,183,77,0.14); }
+
+  .card-label {
+    font-size: 11px; color: var(--dim); margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+  }
+  .card-sub {
+    font-size: 15px; color: #fff; margin-top: 8px;
+    font-variant-numeric: tabular-nums; font-weight: 700;
+  }
+  .card-sub.dim-sub { color: var(--dim); font-weight: 600; }
+
+  .compass { width: 108px; height: 108px; }
+  .tilt-canvas { width: 118px; height: 70px; }
+  .gmeter { width: 108px; height: 108px; }
+
+  .motor-bars { display: flex; gap: 22px; }
+  .motor-col { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .motor-track { width: 28px; height: 70px; border-radius: 6px; background: rgba(0,0,0,0.3); position: relative; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.4); }
+  .motor-fill { position:absolute; left:0; right:0; }
+  .motor-fill.ok { background: linear-gradient(180deg, #6ff0a8, var(--ok)); bottom: 50%; }
+  .motor-fill.warn { background: linear-gradient(180deg, var(--warn), #e69a3a); top: 50%; }
+  .motor-pct { font-size: 12px; color: var(--dim); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="status-bar">
+    <h1 class="title">Rover</h1>
+    <div class="status-right">
+      <span id="failsafeBanner" class="failsafe-banner"><span>⚠</span> Drive failsafe tripped</span>
+      <span class="status-item">
+        <svg class="battery-icon" viewBox="0 0 24 12">
+          <rect x="0.5" y="0.5" width="20" height="11" rx="2.5" fill="none" stroke="var(--dim)" stroke-width="1"/>
+          <rect x="21.5" y="4" width="2" height="4" rx="1" fill="var(--dim)"/>
+          <rect x="2.5" y="2.5" width="14" height="7" rx="1" fill="var(--ok)"/>
+        </svg>
+        <span class="battery-volts">3.95V</span>
+      </span>
+      <span class="status-item"><span class="conn-dot"></span>Connected · 1 client</span>
+      <span class="status-item">Uptime 00:14:32</span>
+      <button class="demo-toggle" id="demoToggle">toggle failsafe (demo)</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <div class="left-pane">
+      <div class="utility-buttons">
+        <div class="util-btn">⇧ Zero Yaw</div>
+        <div class="util-btn">↻ Calibrate</div>
+      </div>
+      <div class="joystick-wrap">
+        <div class="joystick-base" id="joystickBase">
+          <div class="joystick-knob" id="joystickKnob"></div>
+        </div>
+        <div class="axis-legend"><span>◀ steer ▶</span><span>▲ throttle ▼</span></div>
+        <div class="readout" id="readout">throttle +0.00 · steer +0.00</div>
+      </div>
+    </div>
+
+    <div class="right-pane">
+      <div class="row">
+        <div class="card">
+          <div class="card-label">Heading</div>
+          <svg class="compass" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <g stroke="rgba(255,255,255,0.2)" stroke-width="1">
+              <line x1="48" y1="8" x2="48" y2="18"/>
+              <line x1="88" y1="48" x2="78" y2="48"/>
+              <line x1="48" y1="88" x2="48" y2="78"/>
+              <line x1="8" y1="48" x2="18" y2="48"/>
+            </g>
+            <rect x="38" y="28" width="20" height="34" rx="6" fill="rgba(0,0,0,0.3)" stroke="var(--accent)" stroke-width="1.5"/>
+            <rect x="29" y="38" width="7" height="24" rx="2" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+            <rect x="29" y="38" width="7" height="14" rx="2" fill="var(--ok)"/>
+            <rect x="60" y="38" width="7" height="24" rx="2" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+            <rect x="60" y="50" width="7" height="6" rx="2" fill="var(--warn)"/>
+            <polygon points="48,2 44,10 52,10" fill="var(--accent)"/>
+          </svg>
+          <div class="card-sub dim-sub">Y +45°</div>
+        </div>
+
+        <div class="card glow-ok">
+          <div class="card-label">Side</div>
+          <svg class="tilt-canvas" viewBox="0 0 100 64">
+            <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <g transform="rotate(-18 50 52)">
+              <rect x="24" y="28" width="52" height="14" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--ok)" stroke-width="1.5"/>
+              <circle cx="32" cy="40" r="6" fill="rgba(255,255,255,0.3)"/>
+              <circle cx="68" cy="40" r="6" fill="rgba(255,255,255,0.3)"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--ok)">+18°</div>
+        </div>
+
+        <div class="card glow-warn">
+          <div class="card-label">Rear</div>
+          <svg class="tilt-canvas" viewBox="0 0 100 64">
+            <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <g transform="rotate(26 50 52)">
+              <rect x="35" y="22" width="30" height="20" rx="4" fill="rgba(0,0,0,0.3)" stroke="var(--warn)" stroke-width="1.5"/>
+              <circle cx="37" cy="40" r="6" fill="rgba(255,255,255,0.3)"/>
+              <circle cx="63" cy="40" r="6" fill="rgba(255,255,255,0.3)"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--warn)">-30°</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="card-label">Motors</div>
+          <div class="motor-bars">
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill ok" style="height:56px; bottom:0; top:auto;"></div></div>
+              <span style="font-weight:600;">L</span>
+              <span class="motor-pct">+80%</span>
+            </div>
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill warn" style="height:21px; top:35px;"></div></div>
+              <span style="font-weight:600;">R</span>
+              <span class="motor-pct">-30%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">G-Force</div>
+          <svg class="gmeter" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="14" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <circle cx="48" cy="48" r="28" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+            <line x1="6" y1="48" x2="90" y2="48" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+            <line x1="48" y1="6" x2="48" y2="90" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+            <circle cx="53" cy="56" r="2.5" fill="var(--accent)" opacity="0.25"/>
+            <circle cx="50" cy="52" r="2.5" fill="var(--accent)" opacity="0.4"/>
+            <circle cx="47" cy="49" r="2.5" fill="var(--accent)" opacity="0.6"/>
+            <circle cx="45" cy="45" r="4.5" fill="var(--ok)" style="filter: drop-shadow(0 0 4px rgba(61,220,132,0.7));"/>
+          </svg>
+          <div class="card-sub dim-sub" style="font-size:12px;">0.15g lat · −0.25g fwd</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const base = document.getElementById('joystickBase');
+  const knob = document.getElementById('joystickKnob');
+  const readout = document.getElementById('readout');
+  const radius = 70;
+
+  let dragging = false;
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const throttle = (-dy / radius).toFixed(2);
+    const steer = (dx / radius).toFixed(2);
+    readout.textContent = `throttle ${throttle >= 0 ? '+' : ''}${throttle} · steer ${steer >= 0 ? '+' : ''}${steer}`;
+  }
+
+  function pointerMove(e) {
+    if (!dragging) return;
+    const rect = base.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = e.clientX - cx;
+    let dy = e.clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius) {
+      dx = (dx / dist) * radius;
+      dy = (dy / dist) * radius;
+    }
+    setKnob(dx, dy);
+  }
+
+  knob.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    knob.classList.add('dragging');
+    knob.setPointerCapture(e.pointerId);
+  });
+  knob.addEventListener('pointermove', pointerMove);
+  knob.addEventListener('pointerup', () => {
+    dragging = false;
+    knob.classList.remove('dragging');
+    setKnob(0, 0);
+  });
+
+  document.getElementById('demoToggle').addEventListener('click', () => {
+    document.getElementById('failsafeBanner').classList.toggle('active');
+  });
+</script>
+</body>
+</html>

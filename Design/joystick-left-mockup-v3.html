@@ -1,0 +1,297 @@
+<!--
+  Rover Control — landscape-only mockup (v3).
+  Battery moved into the status bar as a compact icon; telemetry is a
+  single row (Heading / Side / Rear / Motors) instead of two stacked rows.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rover Control — v3 (landscape only)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #2a2f3a;
+    --dim: #8a93a6;
+    --ok: #3ddc84;
+    --warn: #ffb74d;
+    --bad: #ff5c5c;
+    --accent: #4da6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  .screen { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- Top status bar ---------- */
+  .status-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid rgba(138,147,166,0.15);
+  }
+  .status-bar .title { font-size: 20px; font-weight: 700; margin: 0; }
+  .status-right { display: flex; align-items: center; gap: 20px; font-size: 13px; color: var(--dim); }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .battery-icon { width: 24px; height: 12px; flex: none; }
+  .battery-volts { font-variant-numeric: tabular-nums; }
+  .failsafe-banner {
+    display: none;
+    align-items: center; gap: 8px;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: rgba(255,183,77,0.15);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    font-size: 13px; font-weight: 600;
+  }
+  .failsafe-banner.active { display: flex; }
+  .demo-toggle {
+    font-size: 11px; color: var(--dim); background: none; border: 1px solid rgba(138,147,166,0.3);
+    border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  }
+
+  /* ---------- Main content ---------- */
+  .content { flex: 1; display: flex; padding: 20px 24px; gap: 20px; min-height: 0; }
+
+  /* Left pane: joystick anchored low for thumb reach, utility buttons just above it */
+  .left-pane {
+    flex: 0 0 36%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 28px; /* clearance above the home-indicator gesture area */
+  }
+  .utility-buttons { display: flex; gap: 10px; }
+  .util-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(77,166,255,0.15);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 13px; font-weight: 600;
+    user-select: none;
+  }
+  .joystick-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .joystick-base {
+    position: relative;
+    width: 230px; height: 230px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid rgba(138,147,166,0.4);
+    touch-action: none;
+  }
+  .joystick-base::before, .joystick-base::after {
+    content: ""; position: absolute; background: rgba(138,147,166,0.25);
+  }
+  .joystick-base::before { left: 8px; right: 8px; top: 50%; height: 1px; transform: translateY(-50%); }
+  .joystick-base::after { top: 8px; bottom: 8px; left: 50%; width: 1px; transform: translateX(-50%); }
+  .joystick-knob {
+    position: absolute;
+    width: 84px; height: 84px;
+    left: 50%; top: 50%;
+    margin-left: -42px; margin-top: -42px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.5);
+  }
+  .joystick-knob.dragging { background: var(--ok); }
+  .axis-legend {
+    display: flex; justify-content: space-between; width: 230px;
+    font-size: 11px; color: var(--dim);
+  }
+  .readout { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* Right pane: one telemetry row, now that battery lives in the status bar */
+  .right-pane { flex: 1; display: flex; align-items: stretch; min-width: 0; }
+  .row { display: flex; gap: 14px; flex: 1; }
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 0;
+  }
+  .card-label { font-size: 13px; color: var(--dim); margin-bottom: 10px; }
+  .card-sub { font-size: 14px; color: var(--dim); margin-top: 10px; font-variant-numeric: tabular-nums; }
+
+  .compass { width: 140px; height: 140px; }
+  .tilt-canvas { width: 150px; height: 92px; }
+
+  .motor-bars { display: flex; gap: 28px; }
+  .motor-col { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .motor-track { width: 34px; height: 92px; border-radius: 5px; background: var(--bg); position: relative; overflow: hidden; }
+  .motor-fill { position:absolute; left:0; right:0; }
+  .motor-fill.ok { background: var(--ok); bottom: 50%; }
+  .motor-fill.warn { background: var(--warn); top: 50%; }
+  .motor-pct { font-size: 13px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="status-bar">
+    <h1 class="title">Rover</h1>
+    <div class="status-right">
+      <span id="failsafeBanner" class="failsafe-banner"><span>⚠</span> Drive failsafe tripped</span>
+      <span class="status-item">
+        <svg class="battery-icon" viewBox="0 0 24 12">
+          <rect x="0.5" y="0.5" width="20" height="11" rx="2.5" fill="none" stroke="var(--dim)" stroke-width="1"/>
+          <rect x="21.5" y="4" width="2" height="4" rx="1" fill="var(--dim)"/>
+          <rect x="2.5" y="2.5" width="14" height="7" rx="1" fill="var(--ok)"/>
+        </svg>
+        <span class="battery-volts">3.95V</span>
+      </span>
+      <span class="status-item"><span class="conn-dot"></span>Connected · 1 client</span>
+      <span class="status-item">Uptime 00:14:32</span>
+      <button class="demo-toggle" id="demoToggle">toggle failsafe (demo)</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <div class="left-pane">
+      <div class="utility-buttons">
+        <div class="util-btn">⇧ Zero Yaw</div>
+        <div class="util-btn">↻ Calibrate</div>
+      </div>
+      <div class="joystick-wrap">
+        <div class="joystick-base" id="joystickBase">
+          <div class="joystick-knob" id="joystickKnob"></div>
+        </div>
+        <div class="axis-legend"><span>◀ steer ▶</span><span>▲ throttle ▼</span></div>
+        <div class="readout" id="readout">throttle +0.00 · steer +0.00</div>
+      </div>
+    </div>
+
+    <div class="right-pane">
+      <div class="row">
+        <div class="card">
+          <div class="card-label">Heading</div>
+          <svg class="compass" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+            <g stroke="rgba(138,147,166,0.5)" stroke-width="1">
+              <line x1="48" y1="8" x2="48" y2="18"/>
+              <line x1="88" y1="48" x2="78" y2="48"/>
+              <line x1="48" y1="88" x2="48" y2="78"/>
+              <line x1="8" y1="48" x2="18" y2="48"/>
+            </g>
+            <rect x="38" y="28" width="20" height="34" rx="6" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5"/>
+            <rect x="29" y="38" width="7" height="24" rx="2" fill="var(--bg)" stroke="rgba(138,147,166,0.5)" stroke-width="0.5"/>
+            <rect x="29" y="38" width="7" height="14" rx="2" fill="var(--ok)"/>
+            <rect x="60" y="38" width="7" height="24" rx="2" fill="var(--bg)" stroke="rgba(138,147,166,0.5)" stroke-width="0.5"/>
+            <rect x="60" y="50" width="7" height="6" rx="2" fill="var(--warn)"/>
+            <polygon points="48,2 44,10 52,10" fill="var(--accent)"/>
+          </svg>
+          <div class="card-sub">Y +45°</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Side</div>
+          <svg class="tilt-canvas" viewBox="0 0 100 64">
+            <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+            <g transform="rotate(-18 50 52)">
+              <rect x="24" y="28" width="52" height="14" rx="4" fill="var(--bg)" stroke="var(--ok)" stroke-width="1.5"/>
+              <circle cx="32" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+              <circle cx="68" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--ok)">+18°</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Rear</div>
+          <svg class="tilt-canvas" viewBox="0 0 100 64">
+            <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+            <g transform="rotate(26 50 52)">
+              <rect x="35" y="22" width="30" height="20" rx="4" fill="var(--bg)" stroke="var(--warn)" stroke-width="1.5"/>
+              <circle cx="37" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+              <circle cx="63" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--warn)">-30°</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Motors</div>
+          <div class="motor-bars">
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill ok" style="height:74px; bottom:0; top:auto;"></div></div>
+              <span>L</span>
+              <span class="motor-pct">+80%</span>
+            </div>
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill warn" style="height:28px; top:46px;"></div></div>
+              <span>R</span>
+              <span class="motor-pct">-30%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const base = document.getElementById('joystickBase');
+  const knob = document.getElementById('joystickKnob');
+  const readout = document.getElementById('readout');
+  const radius = 73; // (230 - 84) / 2
+
+  let dragging = false;
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const throttle = (-dy / radius).toFixed(2);
+    const steer = (dx / radius).toFixed(2);
+    readout.textContent = `throttle ${throttle >= 0 ? '+' : ''}${throttle} · steer ${steer >= 0 ? '+' : ''}${steer}`;
+  }
+
+  function pointerMove(e) {
+    if (!dragging) return;
+    const rect = base.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = e.clientX - cx;
+    let dy = e.clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius) {
+      dx = (dx / dist) * radius;
+      dy = (dy / dist) * radius;
+    }
+    setKnob(dx, dy);
+  }
+
+  knob.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    knob.classList.add('dragging');
+    knob.setPointerCapture(e.pointerId);
+  });
+  knob.addEventListener('pointermove', pointerMove);
+  knob.addEventListener('pointerup', () => {
+    dragging = false;
+    knob.classList.remove('dragging');
+    setKnob(0, 0);
+  });
+
+  document.getElementById('demoToggle').addEventListener('click', () => {
+    document.getElementById('failsafeBanner').classList.toggle('active');
+  });
+</script>
+</body>
+</html>

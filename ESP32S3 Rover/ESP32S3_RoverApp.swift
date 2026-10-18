@@ -6,16 +6,12 @@
 //
 
 import SwiftUI
-import CoreData
 
 @main
 struct ESP32S3_RoverApp: App {
-    let persistenceController = PersistenceController.shared
-
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+            RootView()
         }
     }
 }

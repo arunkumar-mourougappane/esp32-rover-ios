@@ -1,0 +1,381 @@
+<!--
+  Rover Control — color + ground-up layout explorer.
+  Landscape-only. Four color themes (switch live, top-right), one
+  restructured layout: Heading + Motors are the always-visible "primary"
+  tier (what matters continuously while driving); Side/Rear/G-Force are a
+  dimmer, collapsible "secondary" tier (occasional-glance diagnostics).
+  Joystick + utility buttons stay a dark glass control cluster regardless
+  of theme, since controls shouldn't change identity when you re-skin content.
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="firmware">
+<head>
+<meta charset="UTF-8">
+<title>Rover Control — color + layout explorer</title>
+<style>
+  :root {
+    --bg: #0f1115; --surface-top: #333a49; --surface-bot: #242931;
+    --dim: #8a93a6; --ok: #3ddc84; --warn: #ffb74d; --bad: #ff5c5c;
+    --accent: #4da6ff; --text: #ffffff; --bg-glow: rgba(77,166,255,0.08);
+  }
+  html[data-theme="amber"] {
+    --bg: #0a0a08; --surface-top: #242018; --surface-bot: #161309;
+    --dim: #8a7a52; --ok: #ffb000; --warn: #ff7a1a; --bad: #ff3b30;
+    --accent: #ffcc33; --text: #ffe9b8; --bg-glow: rgba(255,176,0,0.07);
+  }
+  html[data-theme="teal"] {
+    --bg: #071019; --surface-top: #132736; --surface-bot: #0b1b26;
+    --dim: #5b89a0; --ok: #2dd9c4; --warn: #f2b945; --bad: #ff3d6b;
+    --accent: #39e6e6; --text: #eafcff; --bg-glow: rgba(57,230,230,0.08);
+  }
+  html[data-theme="daylight"] {
+    --bg: #eef1f4; --surface-top: #ffffff; --surface-bot: #e7eaee;
+    --dim: #5b6472; --ok: #1a7f4e; --warn: #b45309; --bad: #c0262b;
+    --accent: #0a66c2; --text: #12161c; --bg-glow: rgba(10,102,194,0.05);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(ellipse 900px 500px at 20% -10%, var(--bg-glow), transparent 60%), var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    transition: background 0.25s ease, color 0.25s ease;
+  }
+
+  .screen { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- Top status bar ---------- */
+  .status-bar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px;
+    box-shadow: 0 1px 0 rgba(128,128,128,0.15);
+  }
+  .status-bar .title { font-size: 19px; font-weight: 700; margin: 0; }
+  .status-left { display: flex; align-items: center; gap: 16px; }
+  .status-right { display: flex; align-items: center; gap: 18px; font-size: 13px; color: var(--dim); }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; box-shadow: 0 0 6px var(--ok); }
+  .battery-icon { width: 24px; height: 12px; flex: none; }
+  .failsafe-banner {
+    display: none; align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px;
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    border: 1px solid var(--warn); color: var(--warn); font-size: 13px; font-weight: 600;
+  }
+  .failsafe-banner.active { display: flex; }
+  .demo-toggle {
+    font-size: 11px; color: var(--dim); background: none; border: 1px solid color-mix(in srgb, var(--dim) 40%, transparent);
+    border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  }
+
+  /* palette switcher */
+  .palette-switcher { display: flex; align-items: center; gap: 8px; }
+  .swatch {
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent; padding: 0;
+  }
+  .swatch.active { border-color: var(--text); }
+  .theme-label { font-size: 11px; color: var(--dim); min-width: 150px; }
+
+  /* ---------- Main content ---------- */
+  .content { flex: 1; display: flex; padding: 16px 24px; gap: 18px; min-height: 0; }
+
+  .left-pane {
+    flex: 0 0 34%; display: flex; flex-direction: column;
+    justify-content: flex-end; align-items: center; gap: 14px; padding-bottom: 26px;
+  }
+  .utility-buttons { display: flex; gap: 10px; }
+  .util-btn {
+    display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.03));
+    backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+    color: #bfe2ff; font-size: 13px; font-weight: 600; user-select: none;
+  }
+  .joystick-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .joystick-base {
+    position: relative; width: 206px; height: 206px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.10), rgba(42,47,58,0.75) 55%, rgba(24,27,34,0.9) 100%);
+    backdrop-filter: blur(14px) saturate(130%); -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.12), inset 0 -12px 24px rgba(0,0,0,0.35), 0 10px 26px rgba(0,0,0,0.45);
+    touch-action: none;
+  }
+  .joystick-base::before, .joystick-base::after { content: ""; position: absolute; background: rgba(255,255,255,0.12); }
+  .joystick-base::before { left: 10px; right: 10px; top: 50%; height: 1px; transform: translateY(-50%); }
+  .joystick-base::after { top: 10px; bottom: 10px; left: 50%; width: 1px; transform: translateX(-50%); }
+  .joystick-knob {
+    position: absolute; width: 74px; height: 74px; left: 50%; top: 50%;
+    margin-left: -37px; margin-top: -37px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 26%, #bfe2ff 0%, #4da6ff 45%, #2d7fd1 100%);
+    box-shadow: 0 10px 22px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.55), inset 0 -8px 14px rgba(0,40,80,0.35);
+  }
+  .joystick-knob.dragging { background: radial-gradient(circle at 32% 26%, #d6ffe9 0%, #3ddc84 45%, #1f9c5c 100%); }
+  .axis-legend { display: flex; justify-content: space-between; width: 206px; font-size: 11px; color: var(--dim); }
+  .readout { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* ---------- Right pane: tiered telemetry ---------- */
+  .right-pane { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  .tier-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 0 2px; display: flex; align-items: center; gap: 8px; }
+  .more-toggle {
+    font-size: 11px; color: var(--accent); background: none; border: none; cursor: pointer;
+    padding: 0; text-decoration: underline; text-underline-offset: 2px;
+  }
+
+  .primary-row { display: flex; gap: 14px; flex: 1.3; }
+  .secondary-row { display: flex; gap: 10px; flex: 0.85; overflow: hidden; transition: flex 0.25s ease, opacity 0.25s ease; }
+  .secondary-row.collapsed { flex: 0; opacity: 0; pointer-events: none; }
+
+  .card {
+    background: linear-gradient(180deg, var(--surface-top) 0%, var(--surface-bot) 100%);
+    border-radius: 16px; padding: 12px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; flex: 1; min-width: 0;
+    border: 1px solid rgba(128,128,128,0.15);
+    box-shadow: 0 8px 18px -6px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .card.secondary { opacity: 0.82; }
+  .card.glow-ok { box-shadow: 0 8px 18px -6px rgba(0,0,0,0.35), 0 0 0 1px color-mix(in srgb, var(--ok) 40%, transparent), 0 0 16px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .card.glow-warn { box-shadow: 0 8px 18px -6px rgba(0,0,0,0.35), 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent), 0 0 16px color-mix(in srgb, var(--warn) 20%, transparent); }
+
+  .card-label { font-size: 11px; color: var(--dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+  .card-sub { font-size: 15px; color: var(--text); margin-top: 8px; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .card-sub.dim-sub { color: var(--dim); font-weight: 600; }
+  .card.secondary .card-label { font-size: 10px; }
+  .card.secondary .card-sub { font-size: 12px; }
+
+  .compass { width: 120px; height: 120px; }
+  .speed-gauge { width: 130px; height: 76px; }
+  .compass.small { width: 80px; height: 80px; }
+  .tilt-canvas { width: 108px; height: 64px; }
+  .tilt-canvas.small { width: 108px; height: 72px; }
+  .gmeter { width: 90px; height: 90px; }
+
+  .motor-bars { display: flex; gap: 26px; }
+  .motor-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .motor-track { width: 30px; height: 82px; border-radius: 6px; background: color-mix(in srgb, var(--bg) 70%, black); position: relative; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+  .motor-fill { position: absolute; left: 0; right: 0; }
+  .motor-fill.ok { background: var(--ok); bottom: 50%; }
+  .motor-fill.warn { background: var(--warn); top: 50%; }
+  .motor-pct { font-size: 12px; color: var(--dim); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="status-bar">
+    <div class="status-left">
+      <h1 class="title">Rover</h1>
+      <div class="palette-switcher">
+        <button class="swatch active" data-theme="firmware" style="background:#4da6ff" title="Firmware Match"></button>
+        <button class="swatch" data-theme="amber" style="background:#ffb000" title="Tactical Amber"></button>
+        <button class="swatch" data-theme="teal" style="background:#2dd9c4" title="Cyber Teal"></button>
+        <button class="swatch" data-theme="daylight" style="background:#0a66c2" title="Daylight (outdoor)"></button>
+        <span class="theme-label" id="themeLabel">Firmware Match — matches your web dashboard</span>
+      </div>
+    </div>
+    <div class="status-right">
+      <span id="failsafeBanner" class="failsafe-banner"><span>⚠</span> Drive failsafe tripped</span>
+      <span class="status-item">
+        <svg class="battery-icon" viewBox="0 0 24 12">
+          <rect x="0.5" y="0.5" width="20" height="11" rx="2.5" fill="none" stroke="var(--dim)" stroke-width="1"/>
+          <rect x="21.5" y="4" width="2" height="4" rx="1" fill="var(--dim)"/>
+          <rect x="2.5" y="2.5" width="14" height="7" rx="1" fill="var(--ok)"/>
+        </svg>
+        <span>3.95V</span>
+      </span>
+      <span class="status-item"><span class="conn-dot"></span>Connected · 1 client</span>
+      <span class="status-item">Uptime 00:14:32</span>
+      <button class="demo-toggle" id="demoToggle">toggle failsafe</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <div class="left-pane">
+      <div class="utility-buttons">
+        <div class="util-btn">⇧ Zero Yaw</div>
+        <div class="util-btn">↻ Calibrate</div>
+      </div>
+      <div class="joystick-wrap">
+        <div class="joystick-base" id="joystickBase">
+          <div class="joystick-knob" id="joystickKnob"></div>
+        </div>
+        <div class="axis-legend"><span>◀ steer ▶</span><span>▲ throttle ▼</span></div>
+        <div class="readout" id="readout">throttle +0.00 · steer +0.00</div>
+      </div>
+    </div>
+
+    <div class="right-pane">
+      <div class="tier-label">Driving</div>
+      <div class="primary-row">
+        <div class="card">
+          <div class="card-label">Heading</div>
+          <svg class="compass" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="1"/>
+            <g stroke="rgba(128,128,128,0.4)" stroke-width="1">
+              <line x1="48" y1="8" x2="48" y2="18"/><line x1="88" y1="48" x2="78" y2="48"/>
+              <line x1="48" y1="88" x2="48" y2="78"/><line x1="8" y1="48" x2="18" y2="48"/>
+            </g>
+            <rect x="38" y="28" width="20" height="34" rx="6" fill="color-mix(in srgb, var(--bg) 60%, transparent)" stroke="var(--accent)" stroke-width="1.5"/>
+            <rect x="29" y="38" width="7" height="24" rx="2" fill="color-mix(in srgb, var(--bg) 60%, transparent)" stroke="rgba(128,128,128,0.4)" stroke-width="0.5"/>
+            <rect x="29" y="38" width="7" height="14" rx="2" fill="var(--ok)"/>
+            <rect x="60" y="38" width="7" height="24" rx="2" fill="color-mix(in srgb, var(--bg) 60%, transparent)" stroke="rgba(128,128,128,0.4)" stroke-width="0.5"/>
+            <rect x="60" y="50" width="7" height="6" rx="2" fill="var(--warn)"/>
+            <polygon points="48,2 44,10 52,10" fill="var(--accent)"/>
+          </svg>
+          <div class="card-sub dim-sub">Y +45°</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Speed <span style="opacity:0.6; text-transform:none; letter-spacing:0;">(IMU est.)</span></div>
+          <svg class="speed-gauge" viewBox="0 0 120 70">
+            <path d="M16,62 A44,44 0 0 1 104,62" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="6" stroke-linecap="round"/>
+            <path d="M16,62 A44,44 0 0 1 32,28" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+            <g stroke="rgba(128,128,128,0.5)" stroke-width="1.5">
+              <line x1="16" y1="62" x2="24" y2="62"/>
+              <line x1="29" y1="31" x2="35" y2="37"/>
+              <line x1="60" y1="18" x2="60" y2="26"/>
+              <line x1="91" y1="31" x2="85" y2="37"/>
+              <line x1="104" y1="62" x2="96" y2="62"/>
+            </g>
+            <line x1="60" y1="62" x2="38" y2="36" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="60" cy="62" r="4" fill="var(--text)"/>
+          </svg>
+          <div class="card-sub">0.34 m/s</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Motors</div>
+          <div class="motor-bars">
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill ok" style="height:66px; bottom:0; top:auto;"></div></div>
+              <span style="font-weight:600;">L</span><span class="motor-pct">+80%</span>
+            </div>
+            <div class="motor-col">
+              <div class="motor-track"><div class="motor-fill warn" style="height:25px; top:41px;"></div></div>
+              <span style="font-weight:600;">R</span><span class="motor-pct">-30%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tier-label">
+        <span>Diagnostics</span>
+        <button class="more-toggle" id="moreToggle">hide ▴</button>
+      </div>
+      <div class="secondary-row" id="secondaryRow">
+        <div class="card secondary glow-warn">
+          <div class="card-label">Side</div>
+          <svg class="tilt-canvas small" viewBox="0 0 120 80">
+            <line x1="10" y1="66" x2="110" y2="66" stroke="rgba(128,128,128,0.35)" stroke-width="1"/>
+            <g transform="rotate(26 60 66)">
+              <path d="M90,57 L90,48 L78,40 L42,40 L30,48 L30,57 Z"
+                    fill="color-mix(in srgb, var(--bg) 70%, transparent)" stroke="var(--warn)" stroke-width="1.6" stroke-linejoin="round"/>
+              <circle cx="41" cy="57" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+              <line x1="36" y1="57" x2="46" y2="57" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="41" y1="52" x2="41" y2="62" stroke="var(--dim)" stroke-width="1"/>
+              <circle cx="79" cy="57" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+              <line x1="74" y1="57" x2="84" y2="57" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="79" y1="52" x2="79" y2="62" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="60" y1="40" x2="60" y2="30" stroke="var(--dim)" stroke-width="1.3"/>
+              <path d="M57,30 L60,27 L63,30 L60,33 Z" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--warn)">-30°</div>
+        </div>
+        <div class="card secondary glow-ok">
+          <div class="card-label">Rear</div>
+          <svg class="tilt-canvas small" viewBox="0 0 120 80">
+            <line x1="10" y1="66" x2="110" y2="66" stroke="rgba(128,128,128,0.35)" stroke-width="1"/>
+            <g transform="rotate(-18 60 66)">
+              <path d="M73,52 L73,44 L67,38 L53,38 L47,44 L47,52 Z"
+                    fill="color-mix(in srgb, var(--bg) 70%, transparent)" stroke="var(--ok)" stroke-width="1.6" stroke-linejoin="round"/>
+              <circle cx="48" cy="52" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+              <line x1="43" y1="52" x2="53" y2="52" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="48" y1="47" x2="48" y2="57" stroke="var(--dim)" stroke-width="1"/>
+              <circle cx="72" cy="52" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+              <line x1="67" y1="52" x2="77" y2="52" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="72" y1="47" x2="72" y2="57" stroke="var(--dim)" stroke-width="1"/>
+              <line x1="60" y1="38" x2="60" y2="28" stroke="var(--dim)" stroke-width="1.3"/>
+              <path d="M57,28 L60,25 L63,28 L60,31 Z" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+            </g>
+          </svg>
+          <div class="card-sub" style="color:var(--ok)">+18°</div>
+        </div>
+        <div class="card secondary">
+          <div class="card-label">G-Force</div>
+          <svg class="gmeter" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="14" fill="none" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+            <circle cx="48" cy="48" r="28" fill="none" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+            <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="1"/>
+            <line x1="6" y1="48" x2="90" y2="48" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+            <line x1="48" y1="6" x2="48" y2="90" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+            <circle cx="47" cy="49" r="2.5" fill="var(--accent)" opacity="0.5"/>
+            <circle cx="45" cy="45" r="4.5" fill="var(--ok)"/>
+          </svg>
+          <div class="card-sub dim-sub" style="font-size:11px;">0.15g · −0.25g</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const base = document.getElementById('joystickBase');
+  const knob = document.getElementById('joystickKnob');
+  const readout = document.getElementById('readout');
+  const radius = 66;
+  let dragging = false;
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const throttle = (-dy / radius).toFixed(2);
+    const steer = (dx / radius).toFixed(2);
+    readout.textContent = `throttle ${throttle >= 0 ? '+' : ''}${throttle} · steer ${steer >= 0 ? '+' : ''}${steer}`;
+  }
+  function pointerMove(e) {
+    if (!dragging) return;
+    const rect = base.getBoundingClientRect();
+    let dx = e.clientX - (rect.left + rect.width / 2);
+    let dy = e.clientY - (rect.top + rect.height / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius) { dx = (dx / dist) * radius; dy = (dy / dist) * radius; }
+    setKnob(dx, dy);
+  }
+  knob.addEventListener('pointerdown', (e) => { dragging = true; knob.classList.add('dragging'); knob.setPointerCapture(e.pointerId); });
+  knob.addEventListener('pointermove', pointerMove);
+  knob.addEventListener('pointerup', () => { dragging = false; knob.classList.remove('dragging'); setKnob(0, 0); });
+
+  document.getElementById('demoToggle').addEventListener('click', () => {
+    document.getElementById('failsafeBanner').classList.toggle('active');
+  });
+
+  const secondaryRow = document.getElementById('secondaryRow');
+  const moreToggle = document.getElementById('moreToggle');
+  moreToggle.addEventListener('click', () => {
+    const collapsed = secondaryRow.classList.toggle('collapsed');
+    moreToggle.textContent = collapsed ? 'show ▾' : 'hide ▴';
+  });
+
+  const themeNames = {
+    firmware: 'Firmware Match — matches your web dashboard',
+    amber: 'Tactical Amber — monochrome HUD, red reserved for real danger',
+    teal: 'Cyber Teal — modern tech product look',
+    daylight: 'Daylight — light/high-contrast for outdoor sun glare'
+  };
+  document.querySelectorAll('.swatch').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+      document.querySelectorAll('.swatch').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('themeLabel').textContent = themeNames[btn.dataset.theme];
+    });
+  });
+</script>
+</body>
+</html>

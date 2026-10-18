@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rover Control — Joystick Left Mockup</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #2a2f3a;
+    --dim: #8a93a6;
+    --ok: #3ddc84;
+    --warn: #ffb74d;
+    --bad: #ff5c5c;
+    --accent: #4da6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+  }
+  .screen {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    padding: 24px;
+    gap: 24px;
+  }
+
+  /* ---------- Left pane: joystick + utility buttons ---------- */
+  .left-pane {
+    flex: 0 0 38%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+  }
+  .utility-buttons { display: flex; gap: 12px; }
+  .util-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: rgba(77,166,255,0.15);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: default;
+    user-select: none;
+  }
+  .joystick-base {
+    position: relative;
+    width: 260px; height: 260px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid rgba(138,147,166,0.4);
+    touch-action: none;
+  }
+  .joystick-base::before, .joystick-base::after {
+    content: "";
+    position: absolute;
+    background: rgba(138,147,166,0.25);
+  }
+  .joystick-base::before { left: 8px; right: 8px; top: 50%; height: 1px; transform: translateY(-50%); }
+  .joystick-base::after { top: 8px; bottom: 8px; left: 50%; width: 1px; transform: translateX(-50%); }
+  .joystick-knob {
+    position: absolute;
+    width: 96px; height: 96px;
+    left: 50%; top: 50%;
+    margin-left: -48px; margin-top: -48px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.5);
+    cursor: grab;
+  }
+  .joystick-knob.dragging { background: var(--ok); cursor: grabbing; }
+  .readout {
+    font-size: 13px;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Right pane: telemetry ---------- */
+  .right-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .title { font-size: 28px; font-weight: 700; margin: 0 0 4px 0; }
+  .row { display: flex; gap: 12px; }
+  .card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+  }
+  .card-label { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+  .card-sub { font-size: 12px; color: var(--dim); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+  /* heading compass */
+  .compass { width: 96px; height: 96px; }
+
+  /* tilt silhouettes */
+  .tilt-canvas { width: 100px; height: 64px; }
+
+  /* battery */
+  .battery-row { display:flex; align-items:center; gap:8px; color: var(--dim); font-size: 12px; }
+  .battery-bar { width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; margin: 8px 0 4px; }
+  .battery-fill { height: 100%; width: 72%; background: var(--ok); }
+  .battery-volts { font-size: 15px; font-variant-numeric: tabular-nums; }
+
+  /* motors */
+  .motor-bars { display: flex; gap: 16px; }
+  .motor-col { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .motor-track { width: 26px; height: 64px; border-radius: 4px; background: var(--bg); position: relative; overflow: hidden; }
+  .motor-fill { position:absolute; left:0; right:0; }
+  .motor-fill.ok { background: var(--ok); bottom: 50%; }
+  .motor-fill.warn { background: var(--warn); top: 50%; }
+  .motor-pct { font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="left-pane">
+    <div class="utility-buttons">
+      <div class="util-btn">⇧ Zero Yaw</div>
+      <div class="util-btn">↻ Calibrate</div>
+    </div>
+    <div class="joystick-base" id="joystickBase">
+      <div class="joystick-knob" id="joystickKnob"></div>
+    </div>
+    <div class="readout" id="readout">throttle +0.00 · steer +0.00</div>
+  </div>
+
+  <div class="right-pane">
+    <h1 class="title">Rover</h1>
+
+    <div class="row">
+      <div class="card">
+        <div class="card-label">Heading</div>
+        <svg class="compass" viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+          <g stroke="rgba(138,147,166,0.5)" stroke-width="1">
+            <line x1="48" y1="8" x2="48" y2="18"/>
+            <line x1="88" y1="48" x2="78" y2="48"/>
+            <line x1="48" y1="88" x2="48" y2="78"/>
+            <line x1="8" y1="48" x2="18" y2="48"/>
+          </g>
+          <rect x="38" y="28" width="20" height="34" rx="6" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.5"/>
+          <rect x="29" y="38" width="7" height="24" rx="2" fill="var(--bg)" stroke="rgba(138,147,166,0.5)" stroke-width="0.5"/>
+          <rect x="29" y="38" width="7" height="14" rx="2" fill="var(--ok)"/>
+          <rect x="60" y="38" width="7" height="24" rx="2" fill="var(--bg)" stroke="rgba(138,147,166,0.5)" stroke-width="0.5"/>
+          <rect x="60" y="50" width="7" height="6" rx="2" fill="var(--warn)"/>
+          <polygon points="48,2 44,10 52,10" fill="var(--accent)"/>
+        </svg>
+        <div class="card-sub">Y +45°</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Side</div>
+        <svg class="tilt-canvas" viewBox="0 0 100 64">
+          <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+          <g transform="rotate(-18 50 52)">
+            <rect x="24" y="28" width="52" height="14" rx="4" fill="var(--bg)" stroke="var(--ok)" stroke-width="1.5"/>
+            <circle cx="32" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+            <circle cx="68" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+          </g>
+        </svg>
+        <div class="card-sub" style="color:var(--ok)">+18°</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Rear</div>
+        <svg class="tilt-canvas" viewBox="0 0 100 64">
+          <line x1="6" y1="52" x2="94" y2="52" stroke="rgba(138,147,166,0.4)" stroke-width="1"/>
+          <g transform="rotate(26 50 52)">
+            <rect x="35" y="22" width="30" height="20" rx="4" fill="var(--bg)" stroke="var(--warn)" stroke-width="1.5"/>
+            <circle cx="37" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+            <circle cx="63" cy="40" r="6" fill="rgba(138,147,166,0.6)"/>
+          </g>
+        </svg>
+        <div class="card-sub" style="color:var(--warn)">-30°</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card" style="align-items:stretch;">
+        <div class="battery-row">🔋 Battery</div>
+        <div class="battery-bar"><div class="battery-fill"></div></div>
+        <div class="battery-volts" style="align-self:center;">3.95 V</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Motors</div>
+        <div class="motor-bars">
+          <div class="motor-col">
+            <div class="motor-track"><div class="motor-fill ok" style="height:51px; bottom:0; top:auto;"></div></div>
+            <span>L</span>
+            <span class="motor-pct">+80%</span>
+          </div>
+          <div class="motor-col">
+            <div class="motor-track"><div class="motor-fill warn" style="height:19px; top:32px;"></div></div>
+            <span>R</span>
+            <span class="motor-pct">-30%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const base = document.getElementById('joystickBase');
+  const knob = document.getElementById('joystickKnob');
+  const readout = document.getElementById('readout');
+  const radius = 82; // (260 - 96) / 2, matches the SwiftUI joystick's clamp radius
+
+  let dragging = false;
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const throttle = (-dy / radius).toFixed(2);
+    const steer = (dx / radius).toFixed(2);
+    readout.textContent = `throttle ${throttle >= 0 ? '+' : ''}${throttle} · steer ${steer >= 0 ? '+' : ''}${steer}`;
+  }
+
+  function pointerMove(e) {
+    if (!dragging) return;
+    const rect = base.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = e.clientX - cx;
+    let dy = e.clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius) {
+      dx = (dx / dist) * radius;
+      dy = (dy / dist) * radius;
+    }
+    setKnob(dx, dy);
+  }
+
+  knob.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    knob.classList.add('dragging');
+    knob.setPointerCapture(e.pointerId);
+  });
+  knob.addEventListener('pointermove', pointerMove);
+  knob.addEventListener('pointerup', () => {
+    dragging = false;
+    knob.classList.remove('dragging');
+    setKnob(0, 0);
+  });
+</script>
+</body>
+</html>

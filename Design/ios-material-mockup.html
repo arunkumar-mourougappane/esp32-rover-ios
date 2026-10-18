@@ -1,0 +1,632 @@
+<!--
+  Rover Control — iOS Material mockup.
+  Starts from the current real app screen (confirmed via device screenshot:
+  status bar, Heading/Speed/Motors primary row, collapsible Side/Rear/
+  G-Force diagnostics row, joystick+buttons bottom-left). The fix here:
+  cards were flat solid-color rectangles ("blocks"). This version uses
+  genuine iOS materials instead — translucent frosted backgrounds with real
+  depth (blur + layered shadow + hairline border), per Apple's HIG: content
+  cards get "standard materials" (translucent/blurred), not Liquid Glass
+  (that's reserved for the joystick/buttons, which already use it and are
+  left untouched here). Soft background blobs are added purely so the
+  backdrop blur has something to actually blur — on the real device the
+  blur would pick up whatever's behind the cards.
+  Fully interactive: drag the joystick, toggle diagnostics, switch themes,
+  and hit "Simulate driving" to see the gauges animate with live-ish data.
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="firmware">
+<head>
+<meta charset="UTF-8">
+<title>Rover Control — iOS Material mockup</title>
+<style>
+  :root {
+    --bg: #0f1115; --surface-tint: 19,39,54; --dim: #8a93a6;
+    --ok: #3ddc84; --warn: #ffb74d; --bad: #ff5c5c; --accent: #4da6ff; --text: #ffffff;
+    --blob1: #4da6ff; --blob2: #3ddc84;
+    /* Height-driven uniform scale, same approach as the real app's
+       `roverUIScale`: 1.0 at a ~760pt-tall reference (11" iPad landscape),
+       shrinking on short iPhone-landscape screens, growing modestly on
+       huge iPads. Set by applyScale() in the script below. */
+    --ui-scale: 1;
+  }
+  html[data-theme="teal"] {
+    --bg: #071019; --surface-tint: 19,39,54; --dim: #5b89a0;
+    --ok: #2dd9c4; --warn: #f2b945; --bad: #ff3d6b; --accent: #39e6e6; --text: #eafcff;
+    --blob1: #39e6e6; --blob2: #2dd9c4;
+  }
+  html[data-theme="amber"] {
+    --bg: #0a0a08; --surface-tint: 36,32,24; --dim: #8a7a52;
+    --ok: #ffb000; --warn: #ff7a1a; --bad: #ff3b30; --accent: #ffcc33; --text: #ffe9b8;
+    --blob1: #ffb000; --blob2: #ff7a1a;
+  }
+  html[data-theme="daylight"] {
+    --bg: #eef1f4; --surface-tint: 255,255,255; --dim: #5b6472;
+    --ok: #1a7f4e; --warn: #b45309; --bad: #c0262b; --accent: #0a66c2; --text: #12161c;
+    --blob1: #0a66c2; --blob2: #1a7f4e;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+    position: relative;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+
+  /* soft blurred color blobs behind everything, so card blur has something to pick up */
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35; pointer-events: none; transition: background 0.3s ease; }
+  .blob1 { width: 480px; height: 480px; top: -140px; left: 10%; background: var(--blob1); }
+  .blob2 { width: 420px; height: 420px; bottom: -160px; right: 8%; background: var(--blob2); opacity: 0.25; }
+
+  /* device-size preview harness: lets you test exact iPad mini / iPhone
+     18 Pro Max landscape logical-point dimensions without resizing the
+     browser window. "Fill window" (default) just uses 100vw/100vh. */
+  body.framed { display: flex; align-items: center; justify-content: center; background: #000; }
+  .device-picker {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 10;
+    display: flex; gap: 8px; background: rgba(20,20,24,0.85); backdrop-filter: blur(12px);
+    padding: 6px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .device-picker button {
+    font-size: 11px; padding: 6px 10px; border-radius: 8px; border: none; cursor: pointer;
+    background: rgba(255,255,255,0.08); color: #ddd; font-weight: 600;
+  }
+  .device-picker button.active { background: var(--accent); color: #000; }
+  .screen-frame {
+    position: relative; overflow: hidden;
+    width: 100vw; height: 100vh;
+  }
+  body.framed .screen-frame { box-shadow: 0 0 0 1px rgba(255,255,255,0.15), 0 20px 60px rgba(0,0,0,0.6); border-radius: 24px; }
+  .screen { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+
+  .status-bar {
+    flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; box-shadow: 0 1px 0 rgba(128,128,128,0.15);
+  }
+  .status-bar .title { font-size: 20px; font-weight: 700; margin: 0; }
+  .status-right { display: flex; align-items: center; gap: 18px; font-size: 13px; color: var(--dim); }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; box-shadow: 0 0 6px var(--ok); }
+  .battery-icon { width: 24px; height: 12px; flex: none; }
+  .theme-switcher { display: flex; gap: 6px; margin-left: 4px; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; padding: 0; }
+  .swatch.active { border-color: var(--text); }
+  .sim-toggle {
+    font-size: 11px; color: var(--accent); background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.25);
+    border-radius: 999px; padding: 5px 12px; cursor: pointer; font-weight: 600;
+  }
+  .sim-toggle.active { background: var(--accent); color: var(--bg); }
+
+  .content { flex: 1; display: flex; padding: calc(20px * var(--ui-scale)) 24px; gap: 20px; min-height: 0; }
+
+  .left-pane { flex: 0 0 auto; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: calc(14px * var(--ui-scale)); padding-bottom: calc(26px * var(--ui-scale)); }
+  .utility-buttons { display: flex; gap: calc(12px * var(--ui-scale)); }
+  .util-btn {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    width: calc(44px * var(--ui-scale)); height: calc(44px * var(--ui-scale));
+    border-radius: 50%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.03));
+    backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.22);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+    color: var(--accent); font-size: calc(18px * var(--ui-scale)); font-weight: 600; user-select: none;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+  }
+  .util-btn:active { transform: scale(0.92); }
+  /* Hover-only tooltip — on iPadOS this maps directly to a trackpad/pointer
+     hover tooltip (SwiftUI's `.help()`), which is the touch-equivalent-free
+     affordance these icon-only buttons need since there's no inline label. */
+  .util-btn::after {
+    content: attr(data-tooltip);
+    position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%);
+    background: rgba(15,15,20,0.92); color: #fff; font-size: 11px; font-weight: 600;
+    padding: 5px 10px; border-radius: 7px; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .util-btn::before {
+    content: ""; position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: rgba(15,15,20,0.92);
+    opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+  }
+  .util-btn:hover::after, .util-btn:hover::before { opacity: 1; }
+  .joystick-base {
+    position: relative;
+    width: calc(220px * var(--ui-scale)); height: calc(220px * var(--ui-scale));
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.10), rgba(42,47,58,0.75) 55%, rgba(24,27,34,0.9) 100%);
+    backdrop-filter: blur(14px) saturate(130%); -webkit-backdrop-filter: blur(14px) saturate(130%);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.12), inset 0 -12px 24px rgba(0,0,0,0.35), 0 10px 26px rgba(0,0,0,0.45);
+    touch-action: none;
+  }
+  .joystick-base::before, .joystick-base::after { content: ""; position: absolute; background: rgba(255,255,255,0.12); }
+  .joystick-base::before { left: 10px; right: 10px; top: 50%; height: 1px; transform: translateY(-50%); }
+  .joystick-base::after { top: 10px; bottom: 10px; left: 50%; width: 1px; transform: translateX(-50%); }
+  .joystick-knob {
+    position: absolute;
+    width: calc(84px * var(--ui-scale)); height: calc(84px * var(--ui-scale));
+    left: 50%; top: 50%;
+    margin-left: calc(-42px * var(--ui-scale)); margin-top: calc(-42px * var(--ui-scale));
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 26%, #bfe2ff 0%, var(--accent) 45%, #2d7fd1 100%);
+    box-shadow: 0 10px 22px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.55), inset 0 -8px 14px rgba(0,40,80,0.35);
+  }
+  .joystick-knob.dragging { background: radial-gradient(circle at 32% 26%, #d6ffe9 0%, var(--ok) 45%, #1f9c5c 100%); }
+  .readout {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: 600; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 6px 14px; border-radius: 999px;
+    background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.18);
+  }
+  .readout .sep { opacity: 0.4; }
+  .readout .readout-dim { opacity: 0.6; font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+
+  /* justify-content: center means that when the diagnostics row is hidden
+     and there's more vertical room than the (now max-height-capped) rows
+     need, the leftover space is distributed evenly above/below as breathing
+     room instead of the remaining row stretching taller ("elongating") to
+     consume it. */
+  .right-pane { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: calc(16px * var(--ui-scale)); min-width: 0; min-height: 0; }
+  .row { display: flex; gap: calc(14px * var(--ui-scale)); flex: 1; min-height: 0; max-height: 320px; }
+
+  /* ---------- the actual fix: frosted material cards, not flat blocks ---------- */
+  .card {
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)),
+      rgba(var(--surface-tint), 0.52);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border-radius: calc(22px * var(--ui-scale));
+    padding: calc(14px * var(--ui-scale));
+    /* Column layout, NOT centered-as-a-group: label stays near the top,
+       the gauge slot flex-grows to consume whatever extra height the card
+       has, and the readout sits at the bottom. This is what actually fixes
+       the empty-space complaint — previously everything was centered as a
+       tight bundle, leaving dead air above and below on any card bigger
+       than its fixed-size content. */
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; min-width: 0; min-height: 0;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 14px 28px -10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .card:active { transform: scale(0.98); }
+  .card.glow-ok { box-shadow: 0 14px 28px -10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent), 0 0 20px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .card.glow-warn { box-shadow: 0 14px 28px -10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent), 0 0 20px color-mix(in srgb, var(--warn) 20%, transparent); }
+
+  .card-label { flex: 0 0 auto; font-size: 11px; color: var(--dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  .card-sub { flex: 0 0 auto; font-size: 15px; color: var(--text); margin-top: 4px; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .card-sub.dim-sub { color: var(--dim); font-weight: 600; }
+
+  /* The gauge slot is what actually grows to fill a big card. Each SVG
+     inside sizes to 100%/100% of it and relies on its viewBox's natural
+     aspect ratio (default preserveAspectRatio="xMidYMid meet") to scale
+     correctly without distortion — capped so it doesn't become absurd on
+     a very large card. */
+  .gauge-slot { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+  .compass, .gmeter { width: 100%; height: 100%; max-width: 230px; max-height: 230px; }
+  .tilt-canvas, .speed-gauge { width: 100%; height: 100%; max-width: 280px; max-height: 190px; }
+
+  .tier-label { flex: 0 0 auto; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 0 2px; display: flex; align-items: center; gap: 10px; }
+  .more-toggle {
+    font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none;
+    color: var(--accent); cursor: pointer;
+    background: rgba(128,128,128,0.14); border: 1px solid rgba(128,128,128,0.22);
+    border-radius: 999px; padding: 6px 14px;
+    transition: transform 0.1s ease;
+  }
+  .more-toggle:active { transform: scale(0.95); }
+
+  .motor-bars { width: 100%; height: 100%; max-height: 230px; display: flex; gap: calc(22px * var(--ui-scale)); align-items: stretch; justify-content: center; }
+  .motor-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .motor-track {
+    flex: 1; min-height: 0;
+    width: calc(28px * var(--ui-scale)); max-width: 60px;
+    border-radius: 6px; background: rgba(0,0,0,0.25); position: relative; overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .motor-fill { position: absolute; left: 0; right: 0; transition: height 0.2s ease, top 0.2s ease, bottom 0.2s ease; }
+  .motor-fill.ok { background: var(--ok); bottom: 50%; }
+  .motor-fill.warn { background: var(--warn); top: 50%; }
+  .motor-pct { font-size: 12px; color: var(--dim); font-weight: 600; }
+
+  .secondary-row.collapsed { display: none; }
+</style>
+</head>
+<body>
+  <div class="device-picker">
+    <button class="active" data-device="fill">Fill window</button>
+    <button data-device="ipadmini">iPad mini (1133×744)</button>
+    <button data-device="iphone18promax">iPhone 18 Pro Max (956×440)</button>
+  </div>
+
+  <div class="screen-frame" id="screenFrame">
+  <div class="blob blob1"></div>
+  <div class="blob blob2"></div>
+
+  <div class="screen">
+    <div class="status-bar">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <h1 class="title">Rover</h1>
+        <div class="theme-switcher">
+          <button class="swatch active" data-theme="firmware" style="background:#4da6ff" title="Firmware"></button>
+          <button class="swatch" data-theme="teal" style="background:#2dd9c4" title="Cyber Teal"></button>
+          <button class="swatch" data-theme="amber" style="background:#ffb000" title="Tactical Amber"></button>
+          <button class="swatch" data-theme="daylight" style="background:#0a66c2" title="Daylight"></button>
+        </div>
+      </div>
+      <div class="status-right">
+        <button class="sim-toggle" id="simToggle">Simulate driving</button>
+        <span class="status-item">
+          <svg class="battery-icon" viewBox="0 0 24 12">
+            <rect x="0.5" y="0.5" width="20" height="11" rx="2.5" fill="none" stroke="var(--dim)" stroke-width="1"/>
+            <rect x="21.5" y="4" width="2" height="4" rx="1" fill="var(--dim)"/>
+            <rect x="2.5" y="2.5" width="14" height="7" rx="1" fill="var(--ok)" id="battFill"/>
+          </svg>
+          <span id="battVolts">4.17V</span>
+        </span>
+        <span class="status-item"><span class="conn-dot"></span>Connected · 1 client</span>
+        <span class="status-item" id="uptime">Uptime 00:23:20</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="left-pane">
+        <div class="utility-buttons">
+          <div class="util-btn" data-tooltip="Zero Yaw" aria-label="Zero Yaw">⇧</div>
+          <div class="util-btn" data-tooltip="Calibrate" aria-label="Calibrate">↻</div>
+        </div>
+        <div class="joystick-base" id="joystickBase">
+          <div class="joystick-knob" id="joystickKnob"></div>
+        </div>
+        <div class="readout">
+          <span><span class="readout-dim">throttle</span> <span id="readoutThrottle">+0.00</span></span>
+          <span class="sep">·</span>
+          <span><span class="readout-dim">steer</span> <span id="readoutSteer">+0.00</span></span>
+        </div>
+      </div>
+
+      <div class="right-pane">
+        <div class="row">
+          <div class="card">
+            <div class="card-label">Heading</div>
+            <div class="gauge-slot">
+              <svg class="compass" viewBox="0 0 96 96">
+                <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="1"/>
+                <g id="headingTicks" stroke="rgba(128,128,128,0.4)" stroke-width="1">
+                  <line x1="48" y1="8" x2="48" y2="18"/><line x1="88" y1="48" x2="78" y2="48"/>
+                  <line x1="48" y1="88" x2="48" y2="78"/><line x1="8" y1="48" x2="18" y2="48"/>
+                </g>
+                <rect x="38" y="28" width="20" height="34" rx="6" fill="rgba(0,0,0,0.3)" stroke="var(--accent)" stroke-width="1.5"/>
+                <rect x="29" y="38" width="7" height="24" rx="2" fill="rgba(0,0,0,0.3)" stroke="rgba(128,128,128,0.4)" stroke-width="0.5"/>
+                <rect x="29" y="38" width="7" height="14" rx="2" fill="var(--ok)"/>
+                <rect x="60" y="38" width="7" height="24" rx="2" fill="rgba(0,0,0,0.3)" stroke="rgba(128,128,128,0.4)" stroke-width="0.5"/>
+                <rect x="60" y="50" width="7" height="6" rx="2" fill="var(--warn)"/>
+                <polygon points="48,2 44,10 52,10" fill="var(--accent)"/>
+              </svg>
+            </div>
+            <div class="card-sub dim-sub" id="headingLabel">Y +36°</div>
+          </div>
+
+          <div class="card">
+            <div class="card-label">Speed <span style="opacity:0.6; text-transform:none; letter-spacing:0;">(IMU est.)</span></div>
+            <div class="gauge-slot">
+              <svg class="speed-gauge" viewBox="0 0 120 70">
+                <path d="M16,62 A44,44 0 0 1 104,62" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="6" stroke-linecap="round"/>
+                <path id="speedFill" d="M16,62 A44,44 0 0 1 16,62" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+                <g stroke="rgba(128,128,128,0.5)" stroke-width="1.5">
+                  <line x1="16" y1="62" x2="24" y2="62"/><line x1="29" y1="31" x2="35" y2="37"/>
+                  <line x1="60" y1="18" x2="60" y2="26"/><line x1="91" y1="31" x2="85" y2="37"/>
+                  <line x1="104" y1="62" x2="96" y2="62"/>
+                </g>
+                <line id="speedNeedle" x1="60" y1="62" x2="16" y2="62" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round"/>
+                <circle cx="60" cy="62" r="4" fill="var(--text)"/>
+              </svg>
+            </div>
+            <div class="card-sub" id="speedLabel">0.00 m/s</div>
+          </div>
+
+          <div class="card">
+            <div class="card-label">Motors</div>
+            <div class="gauge-slot">
+              <div class="motor-bars">
+                <div class="motor-col">
+                  <div class="motor-track"><div class="motor-fill ok" id="motorL" style="height:0px; bottom:0; top:auto;"></div></div>
+                  <span style="font-weight:600;">L</span><span class="motor-pct" id="motorLPct">+0%</span>
+                </div>
+                <div class="motor-col">
+                  <div class="motor-track"><div class="motor-fill ok" id="motorR" style="height:0px; bottom:0; top:auto;"></div></div>
+                  <span style="font-weight:600;">R</span><span class="motor-pct" id="motorRPct">+0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tier-label">
+          <span>Diagnostics</span>
+          <button class="more-toggle" id="moreToggle">hide ▴</button>
+        </div>
+        <div class="row secondary-row" id="secondaryRow">
+          <div class="card glow-ok" id="sideCard">
+            <div class="card-label">Side</div>
+            <div class="gauge-slot">
+              <svg class="tilt-canvas" viewBox="0 0 120 80">
+                <line x1="10" y1="66" x2="110" y2="66" stroke="rgba(128,128,128,0.35)" stroke-width="1"/>
+                <g id="sideGroup" transform="rotate(1 60 66)">
+                  <path d="M90,57 L90,48 L78,40 L42,40 L30,48 L30,57 Z" fill="rgba(0,0,0,0.3)" stroke="var(--ok)" stroke-width="1.6" stroke-linejoin="round"/>
+                  <circle cx="41" cy="57" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                  <line x1="36" y1="57" x2="46" y2="57" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="41" y1="52" x2="41" y2="62" stroke="var(--dim)" stroke-width="1"/>
+                  <circle cx="79" cy="57" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                  <line x1="74" y1="57" x2="84" y2="57" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="79" y1="52" x2="79" y2="62" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="60" y1="40" x2="60" y2="30" stroke="var(--dim)" stroke-width="1.3"/>
+                  <path d="M57,30 L60,27 L63,30 L60,33 Z" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                </g>
+              </svg>
+            </div>
+            <div class="card-sub" style="color:var(--ok)" id="sideLabel">+1°</div>
+          </div>
+
+          <div class="card glow-warn" id="rearCard">
+            <div class="card-label">Rear</div>
+            <div class="gauge-slot">
+              <svg class="tilt-canvas" viewBox="0 0 120 80">
+                <line x1="10" y1="66" x2="110" y2="66" stroke="rgba(128,128,128,0.35)" stroke-width="1"/>
+                <g id="rearGroup" transform="rotate(-4 60 66)">
+                  <path d="M73,52 L73,44 L67,38 L53,38 L47,44 L47,52 Z" fill="rgba(0,0,0,0.3)" stroke="var(--warn)" stroke-width="1.6" stroke-linejoin="round"/>
+                  <circle cx="48" cy="52" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                  <line x1="43" y1="52" x2="53" y2="52" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="48" y1="47" x2="48" y2="57" stroke="var(--dim)" stroke-width="1"/>
+                  <circle cx="72" cy="52" r="8" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                  <line x1="67" y1="52" x2="77" y2="52" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="72" y1="47" x2="72" y2="57" stroke="var(--dim)" stroke-width="1"/>
+                  <line x1="60" y1="38" x2="60" y2="28" stroke="var(--dim)" stroke-width="1.3"/>
+                  <path d="M57,28 L60,25 L63,28 L60,31 Z" fill="none" stroke="var(--dim)" stroke-width="1.3"/>
+                </g>
+              </svg>
+            </div>
+            <div class="card-sub" style="color:var(--warn)" id="rearLabel">+4°</div>
+          </div>
+
+          <div class="card">
+            <div class="card-label">G-Force</div>
+            <div class="gauge-slot">
+              <svg class="gmeter" viewBox="0 0 96 96">
+                <circle cx="48" cy="48" r="14" fill="none" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+                <circle cx="48" cy="48" r="28" fill="none" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+                <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="1"/>
+                <line x1="6" y1="48" x2="90" y2="48" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+                <line x1="48" y1="6" x2="48" y2="90" stroke="rgba(128,128,128,0.25)" stroke-width="1"/>
+                <circle id="gdot" cx="49" cy="47" r="4.5" fill="var(--ok)"/>
+              </svg>
+            </div>
+            <div class="card-sub dim-sub" id="gforceLabel" style="font-size:12px;">-0.05g · +0.05g</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<script>
+  // ---- responsive scale (mirrors the Swift app's `roverUIScale`) ----
+  // 1.0 at a ~760pt-tall reference (11" iPad landscape); clamped so it
+  // shrinks on a short iPhone-landscape screen (iPhone 18 Pro Max is
+  // ~430pt tall landscape) and grows modestly on a huge iPad, without
+  // the gauges either vanishing or ballooning.
+  const REFERENCE_HEIGHT = 760;
+  const MIN_SCALE = 0.56;
+  const MAX_SCALE = 1.3;
+
+  function currentScale() {
+    return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1;
+  }
+
+  const screenFrame = document.getElementById('screenFrame');
+
+  function applyScale() {
+    // Scale off the frame's actual height, not the browser window — so it
+    // responds correctly to the device-size presets below too.
+    const raw = screenFrame.clientHeight / REFERENCE_HEIGHT;
+    const scale = Math.min(Math.max(raw, MIN_SCALE), MAX_SCALE);
+    document.documentElement.style.setProperty('--ui-scale', scale.toFixed(3));
+  }
+  window.addEventListener('resize', applyScale);
+  applyScale();
+
+  // ---- device-size presets ----
+  // Logical point dimensions, landscape. iPhone 18 Pro Max isn't released
+  // at time of writing — this uses the most recent known Pro Max-class
+  // logical resolution (430×932 portrait) as the closest stand-in.
+  const DEVICE_SIZES = {
+    fill: null,
+    ipadmini: { width: 1133, height: 744 },
+    iphone18promax: { width: 956, height: 440 },
+  };
+  document.querySelectorAll('.device-picker button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.device-picker button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const size = DEVICE_SIZES[btn.dataset.device];
+      if (size) {
+        document.body.classList.add('framed');
+        screenFrame.style.width = size.width + 'px';
+        screenFrame.style.height = size.height + 'px';
+      } else {
+        document.body.classList.remove('framed');
+        screenFrame.style.width = '100vw';
+        screenFrame.style.height = '100vh';
+      }
+      // wait for the CSS transition/layout to settle before re-measuring
+      requestAnimationFrame(() => requestAnimationFrame(applyScale));
+    });
+  });
+
+  // ---- joystick ----
+  const base = document.getElementById('joystickBase');
+  const knob = document.getElementById('joystickKnob');
+  const readoutThrottle = document.getElementById('readoutThrottle');
+  const readoutSteer = document.getElementById('readoutSteer');
+  let dragging = false;
+
+  function joystickRadius() {
+    // (baseDiameter - baseKnobDiameter) / 2, scaled — matches the CSS
+    // calc() sizing on .joystick-base/.joystick-knob exactly.
+    return (220 - 84) / 2 * currentScale();
+  }
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const radius = joystickRadius();
+    const throttle = (-dy / radius).toFixed(2);
+    const steer = (dx / radius).toFixed(2);
+    readoutThrottle.textContent = `${throttle >= 0 ? '+' : ''}${throttle}`;
+    readoutSteer.textContent = `${steer >= 0 ? '+' : ''}${steer}`;
+    if (!simulating) {
+      const l = Math.max(-1, Math.min(1, parseFloat(throttle) + parseFloat(steer)));
+      const r = Math.max(-1, Math.min(1, parseFloat(throttle) - parseFloat(steer)));
+      setMotors(l, r);
+    }
+  }
+  function pointerMove(e) {
+    if (!dragging) return;
+    const radius = joystickRadius();
+    const rect = base.getBoundingClientRect();
+    let dx = e.clientX - (rect.left + rect.width / 2);
+    let dy = e.clientY - (rect.top + rect.height / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist > radius) { dx = (dx / dist) * radius; dy = (dy / dist) * radius; }
+    setKnob(dx, dy);
+  }
+  knob.addEventListener('pointerdown', (e) => { dragging = true; knob.classList.add('dragging'); knob.setPointerCapture(e.pointerId); });
+  knob.addEventListener('pointermove', pointerMove);
+  knob.addEventListener('pointerup', () => { dragging = false; knob.classList.remove('dragging'); setKnob(0, 0); if (!simulating) setMotors(0,0); });
+
+  // ---- diagnostics toggle ----
+  const secondaryRow = document.getElementById('secondaryRow');
+  const moreToggle = document.getElementById('moreToggle');
+  moreToggle.addEventListener('click', () => {
+    const collapsed = secondaryRow.classList.toggle('collapsed');
+    moreToggle.textContent = collapsed ? 'show ▾' : 'hide ▴';
+  });
+
+  // ---- theme switcher ----
+  document.querySelectorAll('.swatch').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+      document.querySelectorAll('.swatch').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // ---- gauge update helpers ----
+  function setMotors(l, r) {
+    // .motor-track now resolves its height from the flex chain
+    // (gauge-slot -> motor-bars -> motor-col -> motor-track), so fill
+    // height is expressed as a percentage of that track rather than a
+    // fixed-px formula — it stays correct no matter how tall the card is.
+    document.getElementById('motorL').style.height = (Math.abs(l) * 50) + '%';
+    document.getElementById('motorL').className = 'motor-fill ' + (l >= 0 ? 'ok' : 'warn');
+    document.getElementById('motorL').style.top = l >= 0 ? 'auto' : '50%';
+    document.getElementById('motorL').style.bottom = l >= 0 ? '0' : 'auto';
+    document.getElementById('motorLPct').textContent = (l >= 0 ? '+' : '') + Math.round(l*100) + '%';
+
+    document.getElementById('motorR').style.height = (Math.abs(r) * 50) + '%';
+    document.getElementById('motorR').className = 'motor-fill ' + (r >= 0 ? 'ok' : 'warn');
+    document.getElementById('motorR').style.top = r >= 0 ? 'auto' : '50%';
+    document.getElementById('motorR').style.bottom = r >= 0 ? '0' : 'auto';
+    document.getElementById('motorRPct').textContent = (r >= 0 ? '+' : '') + Math.round(r*100) + '%';
+  }
+
+  function setSpeed(v) {
+    const maxSpeed = 1.2;
+    const frac = Math.max(0, Math.min(1, v / maxSpeed));
+    const cx = 60, cy = 62, r = 44;
+    function pt(t) { const a = (180 - t*180) * Math.PI/180; return [cx + r*Math.cos(a), cy - r*Math.sin(a)]; }
+    const [ex, ey] = pt(frac);
+    document.getElementById('speedFill').setAttribute('d', `M16,62 A44,44 0 ${frac > 0.5 ? 1 : 0} 1 ${ex.toFixed(1)},${ey.toFixed(1)}`);
+    const [nx, ny] = pt(frac);
+    document.getElementById('speedNeedle').setAttribute('x2', nx.toFixed(1));
+    document.getElementById('speedNeedle').setAttribute('y2', ny.toFixed(1));
+    document.getElementById('speedLabel').textContent = v.toFixed(2) + ' m/s';
+  }
+
+  function tiltColor(deg) {
+    const m = Math.abs(deg);
+    return m > 35 ? 'var(--bad)' : m > 20 ? 'var(--warn)' : 'var(--ok)';
+  }
+  function setTilt(which, deg) {
+    const group = document.getElementById(which + 'Group');
+    const label = document.getElementById(which + 'Label');
+    const card = document.getElementById(which + 'Card');
+    const clamped = Math.max(-45, Math.min(45, deg));
+    group.setAttribute('transform', `rotate(${-clamped} 60 66)`);
+    label.textContent = (deg >= 0 ? '+' : '') + deg.toFixed(0) + '°';
+    const col = tiltColor(deg);
+    label.style.color = col;
+    card.querySelector('path').setAttribute('stroke', col);
+    card.className = 'card ' + (col === 'var(--ok)' ? 'glow-ok' : col === 'var(--warn)' ? 'glow-warn' : '');
+  }
+
+  function setGForce(lat, fwd) {
+    const scale = 42 / 0.6;
+    const cx = 48 - Math.max(-0.6, Math.min(0.6, lat)) * scale;
+    const cy = 48 - Math.max(-0.6, Math.min(0.6, fwd)) * scale;
+    document.getElementById('gdot').setAttribute('cx', cx.toFixed(1));
+    document.getElementById('gdot').setAttribute('cy', cy.toFixed(1));
+    document.getElementById('gforceLabel').textContent = `${lat.toFixed(2)}g · ${fwd.toFixed(2)}g`;
+  }
+
+  function setHeading(yaw) {
+    document.getElementById('headingLabel').textContent = 'Y ' + (yaw >= 0 ? '+' : '') + yaw.toFixed(0) + '°';
+    document.getElementById('headingTicks').setAttribute('transform', `rotate(${yaw} 48 48)`);
+  }
+
+  // ---- simulate driving ----
+  let simulating = false;
+  let simT = 0;
+  let simInterval = null;
+  document.getElementById('simToggle').addEventListener('click', (e) => {
+    simulating = !simulating;
+    e.target.classList.toggle('active', simulating);
+    e.target.textContent = simulating ? 'Stop simulation' : 'Simulate driving';
+    if (simulating) {
+      simInterval = setInterval(() => {
+        simT += 0.1;
+        const speed = Math.max(0, 0.6 + 0.5 * Math.sin(simT));
+        setSpeed(speed);
+        setMotors(0.7 + 0.2*Math.sin(simT*1.3), 0.5 + 0.3*Math.sin(simT*0.9));
+        setTilt('side', 15 * Math.sin(simT * 0.7));
+        setTilt('rear', 25 * Math.sin(simT * 0.5 + 1));
+        setGForce(0.3 * Math.sin(simT * 1.1), 0.25 * Math.cos(simT * 0.8));
+        setHeading((simT * 12) % 360 - 180);
+      }, 100);
+    } else {
+      clearInterval(simInterval);
+      setSpeed(0); setMotors(0,0); setTilt('side', 1); setTilt('rear', -4); setGForce(-0.05, 0.05); setHeading(36);
+    }
+  });
+
+  // uptime ticking, just for life
+  let uptimeSec = 23*60 + 20;
+  setInterval(() => {
+    uptimeSec++;
+    const h = String(Math.floor(uptimeSec/3600)).padStart(2,'0');
+    const m = String(Math.floor((uptimeSec%3600)/60)).padStart(2,'0');
+    const s = String(uptimeSec%60).padStart(2,'0');
+    document.getElementById('uptime').textContent = `Uptime ${h}:${m}:${s}`;
+  }, 1000);
+</script>
+</body>
+</html>

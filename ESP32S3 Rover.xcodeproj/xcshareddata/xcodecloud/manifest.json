@@ -1,0 +1,9 @@
+{
+  "id" : "5a2fdfa9-02af-4887-ad20-9e6567cfeb97",
+  "targets" : [
+    {
+      "id" : "78ef172d-10b4-47a8-a89f-2d49306798fc",
+      "name" : "ESP32S3 Rover"
+    }
+  ]
+}
