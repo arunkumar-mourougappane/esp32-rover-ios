@@ -7,7 +7,10 @@ import SwiftUI
 
 struct ErrorView: View {
     let message: String
-    let retry: () -> Void
+    /// Non-nil when a dropped connection can skip straight back to the
+    /// WebSocket link instead of a full BLE re-pair. `nil` hides the button.
+    let onReconnect: (() -> Void)?
+    let onStartOver: () -> Void
 
     var body: some View {
         ContentUnavailableView {
@@ -16,9 +19,18 @@ struct ErrorView: View {
         } description: {
             Text(message)
         } actions: {
-            Button("Try Again", action: retry)
-                .buttonStyle(.borderedProminent)
-                .tint(RoverTheme.accent)
+            if let onReconnect {
+                Button("Reconnect", action: onReconnect)
+                    .buttonStyle(.borderedProminent)
+                    .tint(RoverTheme.accent)
+                Button("Start Over", action: onStartOver)
+                    .buttonStyle(.bordered)
+                    .tint(RoverTheme.dim)
+            } else {
+                Button("Try Again", action: onStartOver)
+                    .buttonStyle(.borderedProminent)
+                    .tint(RoverTheme.accent)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoverTheme.background)

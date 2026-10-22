@@ -26,6 +26,12 @@ final class RoverSessionStore {
     private(set) var phase: Phase = .scanning
     private(set) var wifiVerificationError: String?
 
+    /// Credentials from the most recent successful pairing, kept around so
+    /// a dropped link (e.g. the watchdog firing on a Wi-Fi blip) can
+    /// `reconnect()` straight back to the WebSocket instead of forcing a
+    /// full BLE re-pair for something that never needed one.
+    private(set) var lastCredentials: RoverCredentials?
+
     let pairingManager = PairingManager()
     let wifiProvisioner = WiFiProvisioner()
     let connection = RoverConnection()
@@ -68,15 +74,37 @@ final class RoverSessionStore {
             try await wifiProvisioner.verifyReachable(ip: credentials.ip, httpPort: credentials.http)
             phase = .connectingLink(credentials)
             connection.connect(ip: credentials.ip, wsPort: credentials.ws)
+            lastCredentials = credentials
             phase = .driving(credentials)
         } catch {
             wifiVerificationError = error.localizedDescription
         }
     }
 
+    /// Reconnects using the last successful pairing's credentials, skipping
+    /// BLE pairing entirely — for when the link merely dropped (e.g. the
+    /// `RoverConnection` watchdog caught a Wi-Fi blip), not when the rover
+    /// itself needs re-pairing. Falls back to `retry()` if there's nothing
+    /// to reconnect to.
+    func reconnect() async {
+        guard let credentials = lastCredentials else {
+            retry()
+            return
+        }
+        phase = .connectingLink(credentials)
+        do {
+            try await wifiProvisioner.verifyReachable(ip: credentials.ip, httpPort: credentials.http)
+            connection.connect(ip: credentials.ip, wsPort: credentials.ws)
+            phase = .driving(credentials)
+        } catch {
+            phase = .error(error.localizedDescription)
+        }
+    }
+
     func retry() {
         connection.disconnect()
         wifiVerificationError = nil
+        lastCredentials = nil
         phase = .scanning
         pairingManager.startScan()
     }

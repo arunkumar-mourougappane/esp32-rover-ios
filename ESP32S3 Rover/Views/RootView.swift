@@ -30,7 +30,11 @@ struct RootView: View {
             case .driving:
                 ControlView(store: store)
             case .error(let message):
-                ErrorView(message: message, retry: store.retry)
+                ErrorView(
+                    message: message,
+                    onReconnect: store.lastCredentials != nil ? { Task { await store.reconnect() } } : nil,
+                    onStartOver: store.retry
+                )
             }
         }
         .animation(.default, value: store.phase)

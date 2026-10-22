@@ -23,6 +23,15 @@ final class PairingManager: NSObject {
     private(set) var bluetoothReady = false
     private var isScanningRequested = false
 
+    /// Backstop for the whole handshake (connect through reading CRED) —
+    /// without this, a rover that connects over BLE but never responds to a
+    /// characteristic read/write (firmware bug, stuck GATT server) leaves
+    /// `pair()` suspended forever with no way out short of backgrounding
+    /// the app.
+    private static let pairingTimeout = Duration.seconds(20)
+    /// How long to wait before re-reading STATUS while it reads `.waiting`.
+    private static let statusPollInterval = Duration.milliseconds(150)
+
     private static let serviceUUID = CBUUID(string: "7D1C0001-5A3E-4B8F-9A62-3C5E1F0A9B10")
     private static let chalUUID = CBUUID(string: "7D1C0002-5A3E-4B8F-9A62-3C5E1F0A9B10")
     private static let authUUID = CBUUID(string: "7D1C0003-5A3E-4B8F-9A62-3C5E1F0A9B10")
@@ -71,6 +80,13 @@ final class PairingManager: NSObject {
         self.activePeripheral = cbPeripheral
         cbPeripheral.delegate = self
 
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.pairingTimeout)
+            guard !Task.isCancelled else { return }
+            self?.finish(.failure(PairingError.timeout))
+        }
+        defer { timeoutTask.cancel() }
+
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             central.connect(cbPeripheral, options: nil)
@@ -107,7 +123,13 @@ final class PairingManager: NSObject {
         let triesLeft = Int(bytes[1])
         switch code {
         case .waiting:
-            break
+            // Firmware is still validating the PIN — poll again shortly
+            // instead of leaving this read as a dead end.
+            Task { [weak self] in
+                try? await Task.sleep(for: Self.statusPollInterval)
+                guard let self, let statusChar = self.statusChar else { return }
+                peripheral.readValue(for: statusChar)
+            }
         case .ok:
             guard let credChar else {
                 finish(.failure(PairingError.characteristicsMissing))
